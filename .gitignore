@@ -1,0 +1,44 @@
+# ==========================================
+# Configurações Locais e Segredos
+# ==========================================
+.env
+.env.local
+
+# ==========================================
+# Python (Cache, Compilados e Ambientes)
+# ==========================================
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# ==========================================
+# Distribuição e Empacotamento (setup.py)
+# ==========================================
+# Pastas geradas ao compilar e instalar o pacote via pip
+build/
+dist/
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+# ==========================================
+# Pastas de Saída de Teste Locais
+# ==========================================
+# Imagens extraídas temporariamente nos testes locais em memória
+imgs/
+# Pastas de saída geradas pelos testes da API (disco)
+test_api_output_*/
+
+# ==========================================
+# IDEs e Arquivos do Sistema
+# ==========================================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
