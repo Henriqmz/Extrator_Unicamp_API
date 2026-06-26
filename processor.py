@@ -136,8 +136,8 @@ def extrair_questoes(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
                     tipo_ou_cor=tipo_prova,
                     ano=ano
                 ),
-                conteudo=Conteudo(enunciado=enunciado),
-                especificacao=Especificacao(area="desconhecida", disciplina=[], assunto=[], topico=[]),
+                conteudo=Conteudo(enunciado=enunciado, objetiva=True),
+                especificacao=Especificacao(disciplina=[], assunto=[], topicos=[]),
                 alternativas=Alternativas(
                     a=alt_dict.get("a", AlternativaItem()),
                     b=alt_dict.get("b", AlternativaItem()),
@@ -179,20 +179,6 @@ def extrair_questoes_dissertativas(texto, edital="unicamp", ano=2026, tipo_prova
                 bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
                 bloco = re.sub(r"\bD\d+\b", "", bloco)
                 
-                # Separa enunciado dos sub-itens
-                partes_sub = re.split(r"\s+\b([a-d])\)\s+", bloco)
-                enunciado = partes_sub[0].strip()
-                
-                sub_itens_dict = {}
-                for j in range(1, len(partes_sub) - 1, 2):
-                    letra = partes_sub[j].lower()
-                    texto_sub = partes_sub[j+1].strip()
-                    sub_itens_dict[letra] = SubItem(letra=letra, texto=texto_sub)
-                    
-                sub_itens_lista = [sub_itens_dict[k] for k in sorted(sub_itens_dict.keys())]
-                if not sub_itens_lista:
-                    sub_itens_lista = None
-                    
                 questoes.append(
                     Questao(
                         metadados=Metadados(
@@ -202,9 +188,8 @@ def extrair_questoes_dissertativas(texto, edital="unicamp", ano=2026, tipo_prova
                             tipo_ou_cor=tipo_prova,
                             ano=ano
                         ),
-                        conteudo=Conteudo(enunciado=enunciado),
-                        especificacao=Especificacao(area="desconhecida", disciplina=[], assunto=[], topico=[]),
-                        sub_itens=sub_itens_lista
+                        conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
+                        especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
                     )
                 )
     return questoes
@@ -508,12 +493,11 @@ def enriquecer_questoes_com_ia(questoes, api_key, mapa_textos=None, max_questoes
 
             prompt = """Você é um professor especialista em vestibulares (como UNICAMP, FUVEST, ENEM).
 Analise as seguintes questões do vestibular e forneça de maneira estruturada:
-1. Área de conhecimento (ex: "Exatas", "Humanas", "Biológicas", "Linguagens", "Ciências da Natureza", "Ciências Humanas").
-2. Disciplinas relacionadas como lista de strings (ex: ["História"], ["Física", "Matemática"]).
-3. Assuntos/temas de estudo abordados na questão como lista de strings (ex: ["Segunda Guerra Mundial"], ["Termodinâmica"]).
-4. Tópicos específicos de estudo como lista de strings (ex: ["Nazismo", "Holocausto"], ["Leis da Termodinâmica"]).
-5. Resolução detalhada passo a passo em português.
-6. Dicas de estudo: retorne como lista de strings, com 1 a 3 dicas específicas e distintas relacionadas ao assunto.
+1. Disciplinas relacionadas como lista de strings (ex: ["História"], ["Física", "Matemática"]).
+2. Assuntos/temas de estudo abordados na questão como lista de strings (ex: ["Segunda Guerra Mundial"], ["Termodinâmica"]).
+3. Tópicos específicos de estudo como lista de strings (ex: ["Nazismo", "Holocausto"], ["Leis da Termodinâmica"]).
+4. Resolução detalhada passo a passo em português.
+5. Dicas de estudo: retorne como lista de strings, com 1 a 3 dicas específicas e distintas relacionadas ao assunto.
 
 Abaixo estão listadas as questões a analisar:
 """
@@ -532,9 +516,10 @@ Abaixo estão listadas as questões a analisar:
                 prompt += f"ENUNCIADO:\n{q.conteudo.enunciado}\n"
                 prompt += "ALTERNATIVAS:\n"
                 for letra in ["a", "b", "c", "d", "e"]:
-                    alt = getattr(q.alternativas, letra)
-                    if alt:
-                        prompt += f"{letra.upper()}) {alt.texto or ''}\n"
+                    if q.alternativas:
+                        alt = getattr(q.alternativas, letra)
+                        if alt:
+                            prompt += f"{letra.upper()}) {alt.texto or ''}\n"
 
             try:
                 t_start = time.time()
@@ -559,7 +544,6 @@ Abaixo estão listadas as questões a analisar:
                     num = analise.numero
                     if num in mapa_questoes_obj:
                         q_obj = mapa_questoes_obj[num]
-                        q_obj.especificacao.area = analise.area
                         
                         # Filtro programático complementar (double-defense) aplicado a listas
                         q_obj.especificacao.disciplina = [
@@ -576,8 +560,8 @@ Abaixo estão listadas as questões a analisar:
                             not any(b in a.strip().lower() for b in ["unicamp", "fuvest", "enem", "vestibular"])
                         ]
                         
-                        q_obj.especificacao.topico = [
-                            t.strip() for t in analise.topico
+                        q_obj.especificacao.topicos = [
+                            t.strip() for t in analise.topicos
                             if t.strip().lower() not in TAG_BLACKLIST and 
                             len(t.strip()) > 1 and 
                             not any(b in t.strip().lower() for b in ["unicamp", "fuvest", "enem", "vestibular"])

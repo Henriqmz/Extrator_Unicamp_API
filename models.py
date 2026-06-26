@@ -7,7 +7,6 @@ __all__ = [
     "Conteudo",
     "Especificacao",
     "Alternativas",
-    "SubItem",
     "Questao",
     "MetadadosComp",
     "ConteudoComp",
@@ -34,12 +33,12 @@ class Conteudo(BaseModel):
     dificuldade: Optional[str] = None
     resolucao: Optional[str] = None
     dica: Optional[List[str]] = None
+    objetiva: bool
 
 class Especificacao(BaseModel):
-    area: str
     disciplina: List[str]
     assunto: List[str]
-    topico: List[str]
+    topicos: List[str]
 
 class Alternativas(BaseModel):
     a: AlternativaItem
@@ -48,17 +47,11 @@ class Alternativas(BaseModel):
     d: AlternativaItem
     e: Optional[AlternativaItem] = None
 
-class SubItem(BaseModel):
-    letra: str
-    texto: str
-    url_img: List[str] = []
-
 class Questao(BaseModel):
     metadados: Metadados
     conteudo: Conteudo
     especificacao: Especificacao
     alternativas: Optional[Alternativas] = None
-    sub_itens: Optional[List[SubItem]] = None
 
 class MetadadosComp(BaseModel):
     codigos_questoes: List[str]
@@ -73,10 +66,9 @@ class TextoComplementar(BaseModel):
 
 class AnaliseQuestaoIA(BaseModel):
     numero: int
-    area: str
     disciplina: List[str]
     assunto: List[str]
-    topico: List[str]
+    topicos: List[str]
     resolucao: str
     dica: List[str]
 

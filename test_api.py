@@ -92,10 +92,10 @@ def main():
         
         q1 = next(q for q in questoes if q.metadados.numero == 1)
         assert q1.alternativas is None, "Questão dissertativa não deve ter alternativas"
-        assert q1.sub_itens is not None, "Questão dissertativa deve ter sub_itens"
-        assert len(q1.sub_itens) == 2, f"Questão 1 deveria ter 2 sub_itens, tem {len(q1.sub_itens)}"
-        assert q1.sub_itens[0].letra == "a"
-        assert "mecanismo linguístico" in q1.sub_itens[0].texto.lower()
+        assert not hasattr(q1, "sub_itens") or q1.sub_itens is None, "Questão dissertativa não deve conter sub_itens como campo separado"
+        assert "a)" in q1.conteudo.enunciado, "Sub-item a) deve estar no enunciado"
+        assert "b)" in q1.conteudo.enunciado, "Sub-item b) deve estar no enunciado"
+        assert "mecanismo linguístico" in q1.conteudo.enunciado.lower(), "Texto do sub-item a) incorreto ou incompleto"
     suite.run("API_02", "extrair_prova_dissertativa em memória", t_api_02)
 
     # Limpar pastas de destino antes de testar gravação em disco
