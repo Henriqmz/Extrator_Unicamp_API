@@ -283,6 +283,51 @@ async def api_extrair_e_salvar_prova_dissertativa(
             except Exception: pass
 
 
+def custom_openapi():
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+    openapi_schema = get_openapi(
+        title=app.title,
+        version=app.version,
+        description=app.description,
+        routes=app.routes,
+    )
+    
+    mapeamento = {
+        "Body_api_extrair_prova_objetiva_extrair_objetiva_post": "ExtrairObjetivaRequest",
+        "Body_api_extrair_prova_dissertativa_extrair_dissertativa_post": "ExtrairDissertativaRequest",
+        "Body_api_extrair_e_salvar_prova_objetiva_extrair_e_salvar_objetiva_post": "SalvarObjetivaRequest",
+        "Body_api_extrair_e_salvar_prova_dissertativa_extrair_e_salvar_dissertativa_post": "SalvarDissertativaRequest"
+    }
+    
+    # 1. Renomear nos components/schemas
+    schemas = openapi_schema.get("components", {}).get("schemas", {})
+    for nome_antigo, nome_novo in mapeamento.items():
+        if nome_antigo in schemas:
+            schemas[nome_novo] = schemas.pop(nome_antigo)
+            
+    # 2. Atualizar todas as referências ($ref) recursivamente no schema JSON
+    def atualizar_refs(obj):
+        if isinstance(obj, dict):
+            for k, v in list(obj.items()):
+                if k == "$ref" and isinstance(v, str):
+                    for nome_antigo, nome_novo in mapeamento.items():
+                        if v.endswith(f"/schemas/{nome_antigo}"):
+                            obj[k] = v.replace(f"/schemas/{nome_antigo}", f"/schemas/{nome_novo}")
+                else:
+                    atualizar_refs(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                atualizar_refs(item)
+                
+    atualizar_refs(openapi_schema)
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
+
+
 if __name__ == "__main__":
     import uvicorn
     # Executa o servidor na porta 8000
