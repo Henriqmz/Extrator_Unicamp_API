@@ -78,30 +78,45 @@ def detectar_edital_ano(pdf_path):
         ano = int(match_ano.group(1))
 
     tipo_prova = "Q-X"
-    for cor in ["azul", "amarelo", "rosa", "verde", "cinza", "branco", "preto", "laranja"]:
-        if cor in nome_arquivo:
-            tipo_prova = cor.upper()
-            break
+    # Palavras-chave específicas para a 2ª fase (checando no caminho completo e no nome do arquivo)
+    caminho_completo_lc = pdf_path.lower()
+    if "biologia" in caminho_completo_lc or "biologica" in caminho_completo_lc or "saude" in caminho_completo_lc:
+        tipo_prova = "BIOLOGICAS"
+    elif "exata" in caminho_completo_lc or "tecnolo" in caminho_completo_lc:
+        tipo_prova = "EXATAS"
+    elif "humana" in caminho_completo_lc or "artes" in caminho_completo_lc:
+        tipo_prova = "HUMANAS"
+    elif "redacao" in caminho_completo_lc or "portugues" in caminho_completo_lc or "literatura" in caminho_completo_lc or "ingles" in caminho_completo_lc:
+        tipo_prova = "REDACAO"
+    elif "dia-1" in caminho_completo_lc or "dia1" in caminho_completo_lc:
+        tipo_prova = "DIA1"
+    elif "dia-2" in caminho_completo_lc or "dia2" in caminho_completo_lc:
+        tipo_prova = "DIA2"
     else:
-        # Formato "X-e-Y" (ex: "provas-unicamp-2023-q-e-z.pdf")
-        match_triple = re.search(r"\b([a-z])\s*[-]\s*e\s*[-]\s*([a-z])\b", nome_arquivo)
-        if match_triple:
-            tipo_prova = f"{match_triple.group(1)}-{match_triple.group(2)}".upper()
+        for cor in ["azul", "amarelo", "rosa", "verde", "cinza", "branco", "preto", "laranja"]:
+            if cor in nome_arquivo:
+                tipo_prova = cor.upper()
+                break
         else:
-            # Formato "X-Y" (ex: "prova-q-x.pdf")
-            match_letras = re.search(r"\b([a-z])\s*[-]\s*([a-z])\b", nome_arquivo)
-            if match_letras:
-                tipo_prova = f"{match_letras.group(1)}-{match_letras.group(2)}".upper()
+            # Formato "X-e-Y" (ex: "provas-unicamp-2023-q-e-z.pdf")
+            match_triple = re.search(r"\b([a-z])\s*[-]\s*e\s*[-]\s*([a-z])\b", nome_arquivo)
+            if match_triple:
+                tipo_prova = f"{match_triple.group(1)}-{match_triple.group(2)}".upper()
             else:
-                # Formato "X e Y" (ex: "Provas E e G.pdf")
-                match_letras_e = re.search(r"\b([a-z])\s+e\s+([a-z])\b", nome_arquivo)
-                if match_letras_e:
-                    tipo_prova = f"{match_letras_e.group(1)}-{match_letras_e.group(2)}".upper()
+                # Formato "X-Y" (ex: "prova-q-x.pdf")
+                match_letras = re.search(r"\b([a-z])\s*[-]\s*([a-z])\b", nome_arquivo)
+                if match_letras:
+                    tipo_prova = f"{match_letras.group(1)}-{match_letras.group(2)}".upper()
                 else:
-                    # Formato geral "prova-X"
-                    match_gen = re.search(r"(?:prova|caderno)-([a-z0-9]+)", nome_arquivo)
-                    if match_gen:
-                        tipo_prova = match_gen.group(1).upper()
+                    # Formato "X e Y" (ex: "Provas E e G.pdf")
+                    match_letras_e = re.search(r"\b([a-z])\s+e\s+([a-z])\b", nome_arquivo)
+                    if match_letras_e:
+                        tipo_prova = f"{match_letras_e.group(1)}-{match_letras_e.group(2)}".upper()
+                    else:
+                        # Formato geral "prova-X"
+                        match_gen = re.search(r"(?:prova|caderno)-([a-z0-9]+)", nome_arquivo)
+                        if match_gen:
+                            tipo_prova = match_gen.group(1).upper()
 
     return edital, ano, tipo_prova
 
@@ -153,45 +168,46 @@ def extrair_questoes(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
 def extrair_questoes_dissertativas(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
     questoes = []
     
-    header = "Resolução (será considerado apenas o que estiver escrito com caneta preta dentro deste espaço)."
-    partes = texto.split(header)
+    # Padrão flexível para cobrir variações de caneta ("preta" ou comum) e "RASCUNHO" no cabeçalho
+    padrao_header = r"Resolu[çc]\u00e3o\s+\(ser\u00e1\s+considerado\s+apenas\s+o\s+que\s+estiver\s+(?:escrito\s+com\s+caneta\s+(?:preta\s+)?)?dentro\s+deste\s+espa[çc]o\)\s*\.?\s*(?:RASCUNHO)?"
+    partes = re.split(padrao_header, texto, flags=re.IGNORECASE)
     
-    # partes[0] contém o início do PDF + a Questão 1.
-    # partes[1] contém a resolução de Q1 + a Questão 2.
-    # ...
-    # partes[9] contém a resolução de Q9 + a Questão 10.
+    num_questoes = len(partes) - 1
+    if num_questoes <= 0:
+        # Fallback caso não encontre divisões: processa o texto inteiro como única questão ou ignora
+        num_questoes = 1
+        partes = [texto, ""]
     
-    for i in range(10):
-        if i < len(partes):
-            bloco_bruto = partes[i]
-            numero = i + 1
+    for i in range(num_questoes):
+        bloco_bruto = partes[i]
+        numero = i + 1
+        
+        # Buscamos o início da questão correspondente na parte correspondente
+        if numero == 1:
+            match = re.search(r"(?:^|\n)\s*1\.\s+(.*)", bloco_bruto, re.DOTALL)
+        else:
+            match = re.search(rf"(?:^|\n)\s*{numero}\.\s+(.*)", bloco_bruto, re.DOTALL)
             
-            # Buscamos o início da questão correspondente na parte correspondente
-            if numero == 1:
-                match = re.search(r"(?:^|\n)\s*1\.\s+(.*)", bloco_bruto, re.DOTALL)
-            else:
-                match = re.search(rf"(?:^|\n)\s*{numero}\.\s+(.*)", bloco_bruto, re.DOTALL)
-                
-            if match:
-                bloco = match.group(1).strip()
-                
-                # Limpa marcas indesejadas
-                bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
-                bloco = re.sub(r"\bD\d+\b", "", bloco)
-                
-                questoes.append(
-                    Questao(
-                        metadados=Metadados(
-                            codigo=f"{edital}_{ano}_q{numero}",
-                            edital=edital,
-                            numero=numero,
-                            tipo_ou_cor=tipo_prova,
-                            ano=ano
-                        ),
-                        conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
-                        especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
-                    )
+        if match:
+            bloco = match.group(1).strip()
+            
+            # Limpa marcas indesejadas
+            bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
+            bloco = re.sub(r"\bD\d+\b", "", bloco)
+            
+            questoes.append(
+                Questao(
+                    metadados=Metadados(
+                        codigo=f"{edital}_{ano}_q{numero}",
+                        edital=edital,
+                        numero=numero,
+                        tipo_ou_cor=tipo_prova,
+                        ano=ano
+                    ),
+                    conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
+                    especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
                 )
+            )
     return questoes
 
 
@@ -212,7 +228,7 @@ def localizar_questoes(paginas):
             if b["type"] == 0:  # Texto
                 for line in b["lines"]:
                     line_text = "".join(span["text"] for span in line["spans"])
-                    match = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s*[A-Z]", line_text)
+                    match = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s+[A-Za-zÀ-ÿ]", line_text)
                     if match:
                         num = int(match.group(1) or match.group(2))
                         x0, y0, x1, y1 = line["bbox"]
@@ -327,7 +343,7 @@ def mapear_imagens_a_questoes_e_alternativas(questoes, imagens, doc):
     questao_atual = None
     for idx_el, el in enumerate(global_elements):
         if el["tipo"] == "texto":
-            match = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s*[A-Z]", el["texto"])
+            match = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s+[A-Za-zÀ-ÿ]", el["texto"])
             if match:
                 questao_atual = int(match.group(1) or match.group(2))
         elif el["tipo"] == "imagem":
@@ -338,7 +354,7 @@ def mapear_imagens_a_questoes_e_alternativas(questoes, imagens, doc):
                     if next_el["tipo"] == "texto":
                         if next_el["pagina"] != el["pagina"]:
                             break
-                        match_next = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s*[A-Z]", next_el["texto"])
+                        match_next = re.search(r"QUESTÃO\s+(\d+)|^\s*(\d+)\.\s+[A-Za-zÀ-ÿ]", next_el["texto"])
                         if match_next:
                             dist_y = next_el["y"] - el["y"]
                             if 0 < dist_y <= 50:
