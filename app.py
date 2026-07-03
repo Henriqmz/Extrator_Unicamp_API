@@ -301,11 +301,13 @@ def custom_openapi():
         "Body_api_extrair_e_salvar_prova_dissertativa_extrair_e_salvar_dissertativa_post": "SalvarDissertativaRequest"
     }
     
-    # 1. Renomear nos components/schemas
+    # 1. Renomear nos components/schemas e atualizar title
     schemas = openapi_schema.get("components", {}).get("schemas", {})
     for nome_antigo, nome_novo in mapeamento.items():
         if nome_antigo in schemas:
             schemas[nome_novo] = schemas.pop(nome_antigo)
+            if isinstance(schemas[nome_novo], dict) and "title" in schemas[nome_novo]:
+                schemas[nome_novo]["title"] = nome_novo
             
     # 2. Atualizar todas as referências ($ref) recursivamente no schema JSON
     def atualizar_refs(obj):
