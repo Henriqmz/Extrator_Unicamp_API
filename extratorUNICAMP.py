@@ -58,8 +58,9 @@ def extrair_prova_objetiva(caminho_prova: str, caminho_gabarito: str = None) -> 
                     gabarito_respostas = respostas
                     break
             if not gabarito_respostas:
-                gabarito_respostas = res[0][0]
-            questoes = aplicar_gabarito(questoes, gabarito_respostas)
+                print(f"[Aviso] Nenhum gabarito correspondente ao tipo '{tipo_prova}' foi encontrado no PDF de gabarito fornecido. As respostas não serão aplicadas.")
+            else:
+                questoes = aplicar_gabarito(questoes, gabarito_respostas)
         elif isinstance(res, tuple):
             respostas, _ = res
             questoes = aplicar_gabarito(questoes, respostas)
@@ -118,8 +119,9 @@ def extrair_e_salvar_prova_objetiva(caminho_prova: str, pasta_destino: str, cami
                     gabarito_respostas = respostas
                     break
             if not gabarito_respostas:
-                gabarito_respostas = res[0][0]
-            questoes = aplicar_gabarito(questoes, gabarito_respostas)
+                print(f"[Aviso] Nenhum gabarito correspondente ao tipo '{tipo_prova}' foi encontrado no PDF de gabarito fornecido. As respostas não serão aplicadas.")
+            else:
+                questoes = aplicar_gabarito(questoes, gabarito_respostas)
         elif isinstance(res, tuple):
             respostas, _ = res
             questoes = aplicar_gabarito(questoes, respostas)

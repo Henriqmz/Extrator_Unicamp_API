@@ -346,6 +346,8 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
     imagens = []
 
     for page_index, page in enumerate(doc):
+        if page_index < 2:
+            continue
         page_height = page.rect.height
         margin_top = page_height * 0.1
         margin_bottom = page_height * 0.9
