@@ -71,9 +71,9 @@ def detectar_edital_ano(pdf_path):
         edital = "unicamp"
 
     ano = 2026
-    match_ano = re.search(r"\b(20[0-9]{2})\b", nome_arquivo)
+    match_ano = re.search(r"\b(200[6-9]|20[1-9]\d)\b", nome_arquivo)
     if not match_ano:
-        match_ano = re.search(r"\b(20[0-9]{2})\b", pdf_path)
+        match_ano = re.search(r"\b(200[6-9]|20[1-9]\d)\b", pdf_path)
     if match_ano:
         ano = int(match_ano.group(1))
 
