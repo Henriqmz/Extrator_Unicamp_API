@@ -352,16 +352,62 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
         margin_top = page_height * 0.1
         margin_bottom = page_height * 0.9
 
+        # Coletar posições Y inferiores dos cabeçalhos de questão na página
+        headers_y1 = []
+        d_page = page.get_text("dict")
+        for b_hdr in d_page["blocks"]:
+            if b_hdr["type"] == 0:
+                for line_hdr in b_hdr["lines"]:
+                    t_hdr = "".join(s["text"] for s in line_hdr["spans"]).strip()
+                    if re.search(r"QUESTÃO\s+\d+|^\s*\d+\.\s+[A-Za-zÀ-ÿ]", t_hdr, re.IGNORECASE):
+                        headers_y1.append(line_hdr["bbox"][3])
+
         # 1. Coleta e agrupamento preliminar de desenhos vetoriais (threshold 30px)
         drawings = page.get_drawings()
         rects_vetoriais = []
+        frac_lines = []
+
         for d in drawings:
             r = d["rect"]
-            if r.is_empty or r.width < 5 or r.height < 5:
+            if r.is_empty:
                 continue
             if r.y1 <= margin_top or r.y0 >= margin_bottom:
                 continue
+
+            # Ignorar tarja cinza do cabeçalho da questão
+            txt_r = page.get_text("text", clip=r).strip()
+            if "QUESTÃO" in txt_r.upper() or re.search(r"QUESTÃO\s+\d+|^\s*\d+\.\s+[A-Za-zÀ-ÿ]", txt_r, re.IGNORECASE):
+                continue
+
+            # Detectar linhas de fração matemáticas (linhas horizontais finas)
+            if 0.3 <= r.height <= 3.0 and 8 <= r.width <= 150:
+                frac_lines.append(r)
+                continue
+
+            if r.width < 5 or r.height < 5:
+                continue
             rects_vetoriais.append(r)
+
+        # Tratar fórmulas matemáticas com linhas de fração
+        if frac_lines:
+            frac_groups = []
+            for fl in frac_lines:
+                merged = False
+                for fg in frac_groups:
+                    if abs(fl.y0 - fg.y0) < 60 and abs(fl.x0 - fg.x0) < 100:
+                        fg |= fl
+                        merged = True
+                        break
+                if not merged:
+                    frac_groups.append(fitz.Rect(fl))
+            for fg in frac_groups:
+                f_rect = fitz.Rect(
+                    max(0, fg.x0 - 15),
+                    max(margin_top, fg.y0 - 25),
+                    min(page.rect.width, fg.x1 + 15),
+                    min(margin_bottom, fg.y1 + 25)
+                )
+                rects_vetoriais.append(f_rect)
 
         grouped_drawings = []
         if rects_vetoriais:
@@ -497,9 +543,14 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
                     union_rect = union_rect | el["rect"]
                 padding = 5
                 margin_top_context = 10  # P3: Reduzido de 30 para 10
+                top_limit = 0
+                if headers_y1:
+                    headers_acima = [hy for hy in headers_y1 if hy <= union_rect.y0 + 2]
+                    if headers_acima:
+                        top_limit = max(headers_acima) + 1
                 m_padded = fitz.Rect(
                     max(0, union_rect.x0 - padding),
-                    max(0, union_rect.y0 - margin_top_context),
+                    max(top_limit, union_rect.y0 - margin_top_context),
                     min(page.rect.width, union_rect.x1 + padding),
                     min(page.rect.height, union_rect.y1 + padding)
                 )
@@ -538,9 +589,14 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
                 else:
                     padding = 5
                     m = el["rect"]
+                    top_limit = 0
+                    if headers_y1:
+                        headers_acima = [hy for hy in headers_y1 if hy <= m.y0 + 2]
+                        if headers_acima:
+                            top_limit = max(headers_acima) + 1
                     m_padded = fitz.Rect(
                         max(0, m.x0 - padding),
-                        max(0, m.y0 - padding),
+                        max(top_limit, m.y0 - padding),
                         min(page.rect.width, m.x1 + padding),
                         min(page.rect.height, m.y1 + padding)
                     )
