@@ -162,52 +162,96 @@ def extrair_questoes(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
                 )
             )
         )
-
     return questoes
 
 def extrair_questoes_dissertativas(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
     questoes = []
-    
-    # Padrão flexível para cobrir variações de caneta ("preta" ou comum) e "RASCUNHO" no cabeçalho
-    padrao_header = r"Resolu[çc]\u00e3o\s+\(ser\u00e1\s+considerado\s+apenas\s+o\s+que\s+estiver\s+(?:escrito\s+com\s+caneta\s+(?:preta\s+)?)?dentro\s+deste\s+espa[çc]o\)\s*\.?\s*(?:RASCUNHO)?"
+
+    # 1. Camada 1 (Moderno): Divisão por delimitador de folha de resposta
+    padrao_header = r"Resolu[çc]ão\s+\(será\s+considerado\s+apenas\s+o\s+que\s+estiver\s+(?:escrito\s+com\s+caneta\s+(?:preta\s+)?)?dentro\s+deste\s+espaço\)\s*\.?\s*(?:RASCUNHO)?"
     partes = re.split(padrao_header, texto, flags=re.IGNORECASE)
-    
-    num_questoes = len(partes) - 1
-    if num_questoes <= 0:
-        # Fallback caso não encontre divisões: processa o texto inteiro como única questão ou ignora
-        num_questoes = 1
-        partes = [texto, ""]
-    
-    for i in range(num_questoes):
-        bloco_bruto = partes[i]
-        numero = i + 1
-        
-        # Buscamos o início da questão correspondente na parte correspondente
-        if numero == 1:
-            match = re.search(r"(?:^|\n)\s*1\.\s+(.*)", bloco_bruto, re.DOTALL)
-        else:
-            match = re.search(rf"(?:^|\n)\s*{numero}\.\s+(.*)", bloco_bruto, re.DOTALL)
-            
-        if match:
-            bloco = match.group(1).strip()
-            
-            # Limpa marcas indesejadas
+
+    if len(partes) > 1:
+        for i in range(len(partes) - 1):
+            bloco_bruto = partes[i]
+            match_num = re.search(r"(?:^|\n)\s*(\d{1,2})\.\s+(.*)", bloco_bruto, re.DOTALL)
+            if match_num:
+                numero = int(match_num.group(1))
+                bloco = match_num.group(2).strip()
+            else:
+                numero = i + 1
+                bloco = bloco_bruto.strip()
+
             bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
             bloco = re.sub(r"\bD\d+\b", "", bloco)
-            
-            questoes.append(
-                Questao(
-                    metadados=Metadados(
-                        codigo=f"{edital}_{ano}_q{numero}",
-                        edital=edital,
-                        numero=numero,
-                        tipo_ou_cor=tipo_prova,
-                        ano=ano
-                    ),
-                    conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
-                    especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
+
+            if bloco:
+                questoes.append(
+                    Questao(
+                        metadados=Metadados(
+                            codigo=f"{edital}_{ano}_q{numero}",
+                            edital=edital,
+                            numero=numero,
+                            tipo_ou_cor=tipo_prova,
+                            ano=ano
+                        ),
+                        conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
+                        especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
+                    )
                 )
-            )
+        if meq := len(questoes):
+            return questoes
+
+    # 2. Camada 2 (Legado): Divisão por marcadores 'QUESTÃO N' ou 'Questão N'
+    padrao_q = r"(?:QUESTÃO|Questão|QUESTAO|Questao)\s+(\d{1,2})\b(.*?)(?=(?:QUESTÃO|Questão|QUESTAO|Questao)\s+\d{1,2}\b|\Z)"
+    matches = list(re.finditer(padrao_q, texto, re.DOTALL))
+    if matches:
+        for match in matches:
+            numero = int(match.group(1))
+            bloco = match.group(2).strip()
+            bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
+            bloco = re.sub(r"\bD\d+\b", "", bloco)
+            if bloco:
+                questoes.append(
+                    Questao(
+                        metadados=Metadados(
+                            codigo=f"{edital}_{ano}_q{numero}",
+                            edital=edital,
+                            numero=numero,
+                            tipo_ou_cor=tipo_prova,
+                            ano=ano
+                        ),
+                        conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
+                        especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
+                    )
+                )
+        if meq := len(questoes):
+            return questoes
+
+    # 3. Camada 3 (Legado Numerado): Divisão por 'N. ' no início de linha
+    padrao_num = r"(?:^|\n)\s*(\d{1,2})\.\s+([A-ZÀ-ÿ0-9\"“'\(].*?)(?=(?:\n\s*\d{1,2}\.\s+[A-ZÀ-ÿ0-9\"“'\(]|\Z))"
+    matches_num = list(re.finditer(padrao_num, texto, re.DOTALL))
+    if matches_num:
+        for match in matches_num:
+            numero = int(match.group(1))
+            bloco = match.group(2).strip()
+            bloco = re.sub(r"\bRASCUNHO\b", "", bloco, flags=re.IGNORECASE)
+            bloco = re.sub(r"\bD\d+\b", "", bloco)
+            if bloco:
+                questoes.append(
+                    Questao(
+                        metadados=Metadados(
+                            codigo=f"{edital}_{ano}_q{numero}",
+                            edital=edital,
+                            numero=numero,
+                            tipo_ou_cor=tipo_prova,
+                            ano=ano
+                        ),
+                        conteudo=Conteudo(enunciado=bloco.strip(), objetiva=False),
+                        especificacao=Especificacao(disciplina=[], assunto=[], topicos=[])
+                    )
+                )
+
     return questoes
 
 
@@ -513,10 +557,11 @@ def aplicar_gabarito(questoes, respostas):
         num = q.metadados.numero
         if num in respostas:
             resp_correta = respostas[num]
-            for letra in ["a", "b", "c", "d", "e"]:
-                alt = getattr(q.alternativas, letra)
-                if alt:
-                    alt.correta = (resp_correta == letra)
+            if q.alternativas:
+                for letra in ["a", "b", "c", "d", "e"]:
+                    alt = getattr(q.alternativas, letra)
+                    if alt:
+                        alt.correta = (resp_correta == letra)
     return questoes
 
 def carregar_env(caminho_env=".env"):

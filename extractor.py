@@ -317,10 +317,15 @@ def gerar_nome(output_dir, prefixo, page_index, tipo, idx, ext):
 def converter_para_webp(caminho_original: str) -> str:
     """Converte uma imagem para WebP, deleta o original e retorna o novo caminho."""
     caminho_webp = os.path.splitext(caminho_original)[0] + ".webp"
-    with Image.open(caminho_original) as img:
-        img.save(caminho_webp, "WEBP", quality=85)
-    os.remove(caminho_original)
-    return caminho_webp
+    try:
+        with Image.open(caminho_original) as img:
+            img.save(caminho_webp, "WEBP", quality=85)
+        if os.path.exists(caminho_original):
+            os.remove(caminho_original)
+        return caminho_webp
+    except Exception as e:
+        print(f"[Aviso] Falha ao converter {os.path.basename(caminho_original)} para WebP: {e}")
+        return caminho_original
 
 def coluna(rect, mid_x):
     """Classificação de coluna mais restritiva."""
@@ -388,6 +393,7 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
                 continue
             rects_vetoriais.append(r)
 
+        formula_rects = []
         # Tratar fórmulas matemáticas com linhas de fração
         if frac_lines:
             frac_groups = []
@@ -408,6 +414,7 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
                     min(margin_bottom, fg.y1 + 25)
                 )
                 rects_vetoriais.append(f_rect)
+                formula_rects.append(f_rect)
 
         grouped_drawings = []
         if rects_vetoriais:
@@ -466,7 +473,8 @@ def extrair_imagens(doc, output_dir="imgs", prefixo=""):
 
         for idx, m in enumerate(grouped_drawings):
             if m.width >= 25 and m.height >= 25:
-                if drawing_eh_texto(page, m):
+                eh_formula = any(m.intersects(fr) for fr in formula_rects)
+                if not eh_formula and drawing_eh_texto(page, m):
                     continue  # Pular drawings que são texto
                 elementos_visuais.append({
                     "rect": m,
