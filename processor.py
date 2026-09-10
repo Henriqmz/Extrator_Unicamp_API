@@ -4,7 +4,7 @@ import time
 from typing import Optional, List
 import fitz
 from models import *
-from extractor import encontrar_labels_alternativas, map_image, linhas_por_coluna, IMG_REL_PREFIX
+from extractor import encontrar_labels_alternativas, map_image, linhas_por_coluna, IMG_REL_PREFIX, validar_e_abrir_pdf
 
 try:
     from google import genai
@@ -56,41 +56,74 @@ def extrair_textos_comp(texto):
         )
     return resultados
 
-def detectar_edital_ano(pdf_path):
+def detectar_edital_ano(pdf_path, doc=None, nome_original=None):
     """
-    Detecta dinamicamente o edital, o ano e a cor/tipo da prova a partir do nome do arquivo ou do caminho.
+    Detecta dinamicamente o edital, o ano e a cor/tipo da prova a partir do nome do arquivo,
+    caminho ou do conteúdo textual da primeira página do PDF.
     """
-    nome_arquivo = os.path.basename(pdf_path).lower()
+    nome_arquivo = (nome_original or os.path.basename(pdf_path)).lower()
+    caminho_completo_lc = os.path.abspath(pdf_path).lower()
 
     edital = "unicamp"
-    if "enem" in nome_arquivo:
-        edital = "enem"
-    elif "fuvest" in nome_arquivo:
-        edital = "fuvest"
-    elif "unicamp" in nome_arquivo:
-        edital = "unicamp"
+    for ed in ["enem", "fuvest", "unicamp", "unesp"]:
+        if ed in nome_arquivo or ed in caminho_completo_lc:
+            edital = ed
+            break
 
-    ano = 2026
+    ano = None
+    # 1. Procura ano no nome do arquivo (prioridade)
     match_ano = re.search(r"\b(200[6-9]|20[1-9]\d)\b", nome_arquivo)
-    if not match_ano:
-        match_ano = re.search(r"\b(200[6-9]|20[1-9]\d)\b", pdf_path)
     if match_ano:
         ano = int(match_ano.group(1))
+    else:
+        # 2. Procura nos diretórios pais, do mais próximo ao mais distante
+        partes_caminho = os.path.abspath(pdf_path).split(os.sep)[:-1]
+        for parte in reversed(partes_caminho):
+            match_parte = re.search(r"\b(200[6-9]|20[1-9]\d)\b", parte.lower())
+            if match_parte:
+                ano = int(match_parte.group(1))
+                break
 
-    tipo_prova = "Q-X"
-    # Palavras-chave específicas para a 2ª fase (checando no caminho completo e no nome do arquivo)
-    caminho_completo_lc = pdf_path.lower()
-    if "biologia" in caminho_completo_lc or "biologica" in caminho_completo_lc or "saude" in caminho_completo_lc:
+    # 3. Procura no texto da capa / primeira página do PDF se não achou ou para confirmação
+    doc_aberto_aqui = False
+    if doc is None and os.path.exists(pdf_path):
+        try:
+            doc = fitz.open(pdf_path)
+            doc_aberto_aqui = True
+        except Exception:
+            doc = None
+
+    if doc and len(doc) > 0:
+        try:
+            texto_capa = doc[0].get_text()
+            if len(doc) > 1 and len(texto_capa.strip()) < 80:
+                texto_capa += "\n" + doc[1].get_text()
+
+            if ano is None:
+                m_capa = re.search(r"vestibular\s+(?:unicamp\s+)?(20\d{2})|unicamp\s+(?:vestibular\s+)?(20\d{2})|conhecimentos\s+gerais[^\n\d]*(20\d{2})", texto_capa, re.IGNORECASE)
+                if m_capa:
+                    ano = int([g for g in m_capa.groups() if g][0])
+                else:
+                    m_capa_gen = re.search(r"\b(200[6-9]|20[1-9]\d)\b", texto_capa)
+                    if m_capa_gen:
+                        ano = int(m_capa_gen.group(1))
+        except Exception:
+            pass
+
+    # 4. Tipo / Caderno da Prova
+    tipo_prova = None
+    alvo_tipo = (nome_original or pdf_path).lower()
+    if "biologia" in alvo_tipo or "biologica" in alvo_tipo or "saude" in alvo_tipo:
         tipo_prova = "BIOLOGICAS"
-    elif "exata" in caminho_completo_lc or "tecnolo" in caminho_completo_lc:
+    elif "exata" in alvo_tipo or "tecnolo" in alvo_tipo:
         tipo_prova = "EXATAS"
-    elif "humana" in caminho_completo_lc or "artes" in caminho_completo_lc:
+    elif "humana" in alvo_tipo or "artes" in alvo_tipo:
         tipo_prova = "HUMANAS"
-    elif "redacao" in caminho_completo_lc or "portugues" in caminho_completo_lc or "literatura" in caminho_completo_lc or "ingles" in caminho_completo_lc:
+    elif "redacao" in alvo_tipo or "portugues" in alvo_tipo or "literatura" in alvo_tipo or "ingles" in alvo_tipo:
         tipo_prova = "REDACAO"
-    elif "dia-1" in caminho_completo_lc or "dia1" in caminho_completo_lc:
+    elif "dia-1" in alvo_tipo or "dia1" in alvo_tipo:
         tipo_prova = "DIA1"
-    elif "dia-2" in caminho_completo_lc or "dia2" in caminho_completo_lc:
+    elif "dia-2" in alvo_tipo or "dia2" in alvo_tipo:
         tipo_prova = "DIA2"
     else:
         for cor in ["azul", "amarelo", "rosa", "verde", "cinza", "branco", "preto", "laranja"]:
@@ -98,27 +131,119 @@ def detectar_edital_ano(pdf_path):
                 tipo_prova = cor.upper()
                 break
         else:
-            # Formato "X-e-Y" (ex: "provas-unicamp-2023-q-e-z.pdf")
             match_triple = re.search(r"\b([a-z])\s*[-]\s*e\s*[-]\s*([a-z])\b", nome_arquivo)
             if match_triple:
                 tipo_prova = f"{match_triple.group(1)}-{match_triple.group(2)}".upper()
             else:
-                # Formato "X-Y" (ex: "prova-q-x.pdf")
                 match_letras = re.search(r"\b([a-z])\s*[-]\s*([a-z])\b", nome_arquivo)
                 if match_letras:
                     tipo_prova = f"{match_letras.group(1)}-{match_letras.group(2)}".upper()
                 else:
-                    # Formato "X e Y" (ex: "Provas E e G.pdf")
                     match_letras_e = re.search(r"\b([a-z])\s+e\s+([a-z])\b", nome_arquivo)
                     if match_letras_e:
                         tipo_prova = f"{match_letras_e.group(1)}-{match_letras_e.group(2)}".upper()
                     else:
-                        # Formato geral "prova-X"
                         match_gen = re.search(r"(?:prova|caderno)-([a-z0-9]+)", nome_arquivo)
                         if match_gen:
                             tipo_prova = match_gen.group(1).upper()
 
+    # Se tipo_prova não foi detectado no nome, procura no texto da capa
+    if not tipo_prova and doc and len(doc) > 0:
+        try:
+            texto_capa = doc[0].get_text()
+            m_tipo_capa = re.search(r"provas?\s+([A-Za-z]\s+e\s+[A-Za-z]|[A-Za-z]-[A-Za-z])", texto_capa, re.IGNORECASE)
+            if m_tipo_capa:
+                tipo_prova = m_tipo_capa.group(1).replace(" e ", "-").replace(" E ", "-").upper()
+            else:
+                m_caderno = re.search(r"caderno\s*[:\s]\s*([A-Za-z])\b", texto_capa, re.IGNORECASE)
+                if m_caderno:
+                    tipo_prova = m_caderno.group(1).upper()
+        except Exception:
+            pass
+
+    if doc_aberto_aqui and doc:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+    if not tipo_prova:
+        tipo_prova = "Q-X"
+    if ano is None:
+        ano = 2026
+
     return edital, ano, tipo_prova
+
+def detectar_metadados_gabarito(gabarito_path, doc=None, nome_original=None):
+    """
+    Detecta dinamicamente o edital, o ano e o tipo do gabarito oficial a partir
+    do nome do arquivo, caminho ou do texto interno do documento.
+    """
+    nome_arquivo = (nome_original or os.path.basename(gabarito_path)).lower()
+    caminho_completo_lc = os.path.abspath(gabarito_path).lower()
+
+    edital = "unicamp"
+    for ed in ["enem", "fuvest", "unicamp", "unesp"]:
+        if ed in nome_arquivo or ed in caminho_completo_lc:
+            edital = ed
+            break
+
+    ano = None
+    match_ano = re.search(r"\b(200[6-9]|20[1-9]\d)\b", nome_arquivo)
+    if match_ano:
+        ano = int(match_ano.group(1))
+    else:
+        partes_caminho = os.path.abspath(gabarito_path).split(os.sep)[:-1]
+        for parte in reversed(partes_caminho):
+            match_parte = re.search(r"\b(200[6-9]|20[1-9]\d)\b", parte.lower())
+            if match_parte:
+                ano = int(match_parte.group(1))
+                break
+
+    doc_aberto_aqui = False
+    if doc is None and os.path.exists(gabarito_path):
+        try:
+            doc = fitz.open(gabarito_path)
+            doc_aberto_aqui = True
+        except Exception:
+            doc = None
+
+    tipo_gabarito = "Desconhecido"
+    if doc and len(doc) > 0:
+        try:
+            texto_p0 = doc[0].get_text()
+            if ano is None:
+                m_txt = re.search(r"vestibular\s+(?:unicamp\s+)?(20\d{2})|conhecimentos\s+gerais[^\n\d]*(20\d{2})|\b(200[6-9]|20[1-9]\d)\b", texto_p0, re.IGNORECASE)
+                if m_txt:
+                    ano = int([g for g in m_txt.groups() if g][0])
+
+            tipo_match = re.search(r"PROVAS?\s+([A-Za-z\s\-e]+)", texto_p0, re.IGNORECASE)
+            if tipo_match:
+                tipo_gabarito = tipo_match.group(1).split("\n")[0].strip()
+        except Exception:
+            pass
+
+    if doc_aberto_aqui and doc:
+        try:
+            doc.close()
+        except Exception:
+            pass
+
+    return edital, ano, tipo_gabarito
+
+def validar_compatibilidade_prova_gabarito(ano_prova, ano_gabarito, edital_prova="unicamp", edital_gabarito="unicamp"):
+    """
+    Verifica se a prova e o gabarito pertencem ao mesmo ano e mesmo vestibular/edital.
+    Lança ValueError se houver incompatibilidade clara.
+    """
+    if ano_prova and ano_gabarito and ano_prova != ano_gabarito:
+        raise ValueError(
+            f"Incompatibilidade detectada: a prova é do ano {ano_prova}, mas o gabarito fornecido é do ano {ano_gabarito}."
+        )
+    if edital_prova and edital_gabarito and edital_prova.lower() != edital_gabarito.lower():
+        raise ValueError(
+            f"Incompatibilidade detectada: a prova é do edital '{edital_prova}', mas o gabarito é do edital '{edital_gabarito}'."
+        )
 
 def extrair_questoes(texto, edital="unicamp", ano=2026, tipo_prova="Q-X"):
     padrao = r"(QUESTÃO\s+(\d+))(.*?)(?=QUESTÃO\s+\d+|\Z)"
@@ -512,7 +637,7 @@ def mapear_imagens_a_questoes_e_alternativas(questoes, imagens, doc):
                                 alt.texto = alt.texto.replace(img_rel_old, img_rel_new)
 
 def extrair_gabarito(gabarito_path):
-    doc = fitz.open(gabarito_path)
+    doc = validar_e_abrir_pdf(gabarito_path, tipo_doc="Gabarito")
     resultados_paginas = []
 
     for page in doc:

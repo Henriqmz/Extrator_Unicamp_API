@@ -1,4 +1,5 @@
 import os
+import re
 import tempfile
 from typing import List, Optional
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
@@ -9,6 +10,8 @@ from extratorUNICAMP import (
     extrair_e_salvar_prova_objetiva,
     extrair_e_salvar_prova_dissertativa,
 )
+from extractor import validar_e_abrir_pdf
+from processor import detectar_edital_ano, detectar_metadados_gabarito, validar_compatibilidade_prova_gabarito
 from models import Questao
 
 app = FastAPI(
@@ -47,6 +50,32 @@ async def redirect_to_docs():
     return RedirectResponse(url="/docs")
 
 
+async def _salvar_upload_temporario(upload_file: UploadFile, prefixo_padrao="arquivo") -> str:
+    nome_orig = os.path.basename(upload_file.filename or f"{prefixo_padrao}.pdf")
+    limpo = re.sub(r"[^a-zA-Z0-9_\-]", "_", os.path.splitext(nome_orig)[0])[:30]
+    with tempfile.NamedTemporaryFile(delete=False, prefix=f"{limpo}_", suffix=".pdf") as tmp:
+        content = await upload_file.read()
+        tmp.write(content)
+        return tmp.name
+
+def _validar_arquivo_pdf(caminho_pdf: str, tipo_doc="PDF"):
+    try:
+        doc = validar_e_abrir_pdf(caminho_pdf, tipo_doc=tipo_doc)
+        doc.close()
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+def _validar_compatibilidade(caminho_prova: str, caminho_gabarito: str):
+    if not caminho_gabarito:
+        return
+    try:
+        _, ano_prova, _ = detectar_edital_ano(caminho_prova)
+        _, ano_gab, _ = detectar_metadados_gabarito(caminho_gabarito)
+        validar_compatibilidade_prova_gabarito(ano_prova, ano_gab)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+
+
 # ==========================================
 # 1. Endpoints de Extração em Memória (Retornam JSON)
 # ==========================================
@@ -68,49 +97,48 @@ async def api_extrair_prova_objetiva(
 ):
     caminho_prova_final = None
     prova_temp_criada = False
-    
-    # 1. Resolver o caminho da prova
-    if caminho_prova and caminho_prova.strip():
-        caminho_prova_final = caminho_prova.strip()
-        if not os.path.exists(caminho_prova_final):
-            raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
-    elif prova:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_prova:
-            content = await prova.read()
-            tmp_prova.write(content)
-            caminho_prova_final = tmp_prova.name
-            prova_temp_criada = True
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
-        )
-        
-    # 2. Resolver o caminho do gabarito
     caminho_gabarito_final = None
     gabarito_temp_criada = False
-    
-    if caminho_gabarito and caminho_gabarito.strip():
-        caminho_gabarito_final = caminho_gabarito.strip()
-        if not os.path.exists(caminho_gabarito_final):
-            if prova_temp_criada and os.path.exists(caminho_prova_final):
-                os.unlink(caminho_prova_final)
-            raise HTTPException(status_code=400, detail=f"Arquivo de gabarito não encontrado: {caminho_gabarito_final}")
-    elif gabarito:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_gabarito:
-            content_g = await gabarito.read()
-            tmp_gabarito.write(content_g)
-            caminho_gabarito_final = tmp_gabarito.name
-            gabarito_temp_criada = True
-            
-    # 3. Executar a extração
+
     try:
+        # 1. Resolver e validar o caminho da prova
+        if caminho_prova and caminho_prova.strip():
+            caminho_prova_final = caminho_prova.strip()
+            if not os.path.exists(caminho_prova_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
+        elif prova:
+            caminho_prova_final = await _salvar_upload_temporario(prova, "prova")
+            prova_temp_criada = True
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
+            )
+        _validar_arquivo_pdf(caminho_prova_final, "Prova")
+
+        # 2. Resolver e validar o caminho do gabarito
+        if caminho_gabarito and caminho_gabarito.strip():
+            caminho_gabarito_final = caminho_gabarito.strip()
+            if not os.path.exists(caminho_gabarito_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de gabarito não encontrado: {caminho_gabarito_final}")
+        elif gabarito:
+            caminho_gabarito_final = await _salvar_upload_temporario(gabarito, "gabarito")
+            gabarito_temp_criada = True
+
+        if caminho_gabarito_final:
+            _validar_arquivo_pdf(caminho_gabarito_final, "Gabarito")
+            _validar_compatibilidade(caminho_prova_final, caminho_gabarito_final)
+
+        # 3. Executar a extração
         questoes = extrair_prova_objetiva(caminho_prova_final, caminho_gabarito_final)
         return questoes
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na extração: {str(e)}")
     finally:
-        # Limpeza de arquivos temporários
         if prova_temp_criada and caminho_prova_final and os.path.exists(caminho_prova_final):
             try: os.unlink(caminho_prova_final)
             except Exception: pass
@@ -132,28 +160,30 @@ async def api_extrair_prova_dissertativa(
 ):
     caminho_prova_final = None
     prova_temp_criada = False
-    
-    # 1. Resolver o caminho da prova
-    if caminho_prova and caminho_prova.strip():
-        caminho_prova_final = caminho_prova.strip()
-        if not os.path.exists(caminho_prova_final):
-            raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
-    elif prova:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_prova:
-            content = await prova.read()
-            tmp_prova.write(content)
-            caminho_prova_final = tmp_prova.name
-            prova_temp_criada = True
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
-        )
-        
-    # 2. Executar a extração
+
     try:
+        # 1. Resolver e validar o caminho da prova
+        if caminho_prova and caminho_prova.strip():
+            caminho_prova_final = caminho_prova.strip()
+            if not os.path.exists(caminho_prova_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
+        elif prova:
+            caminho_prova_final = await _salvar_upload_temporario(prova, "prova_dissertativa")
+            prova_temp_criada = True
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
+            )
+        _validar_arquivo_pdf(caminho_prova_final, "Prova")
+
+        # 2. Executar a extração
         questoes = extrair_prova_dissertativa(caminho_prova_final)
         return questoes
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na extração: {str(e)}")
     finally:
@@ -183,48 +213,48 @@ async def api_extrair_e_salvar_prova_objetiva(
 ):
     caminho_prova_final = None
     prova_temp_criada = False
-    
-    # 1. Resolver o caminho da prova
-    if caminho_prova and caminho_prova.strip():
-        caminho_prova_final = caminho_prova.strip()
-        if not os.path.exists(caminho_prova_final):
-            raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
-    elif prova:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_prova:
-            content = await prova.read()
-            tmp_prova.write(content)
-            caminho_prova_final = tmp_prova.name
-            prova_temp_criada = True
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
-        )
-        
-    # 2. Resolver o caminho do gabarito
     caminho_gabarito_final = None
     gabarito_temp_criada = False
-    
-    if caminho_gabarito and caminho_gabarito.strip():
-        caminho_gabarito_final = caminho_gabarito.strip()
-        if not os.path.exists(caminho_gabarito_final):
-            if prova_temp_criada and os.path.exists(caminho_prova_final):
-                os.unlink(caminho_prova_final)
-            raise HTTPException(status_code=400, detail=f"Arquivo de gabarito não encontrado: {caminho_gabarito_final}")
-    elif gabarito:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_gabarito:
-            content_g = await gabarito.read()
-            tmp_gabarito.write(content_g)
-            caminho_gabarito_final = tmp_gabarito.name
-            gabarito_temp_criada = True
-            
-    # 3. Executar a gravação
+
     try:
+        # 1. Resolver e validar o caminho da prova
+        if caminho_prova and caminho_prova.strip():
+            caminho_prova_final = caminho_prova.strip()
+            if not os.path.exists(caminho_prova_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
+        elif prova:
+            caminho_prova_final = await _salvar_upload_temporario(prova, "prova")
+            prova_temp_criada = True
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
+            )
+        _validar_arquivo_pdf(caminho_prova_final, "Prova")
+
+        # 2. Resolver e validar o caminho do gabarito
+        if caminho_gabarito and caminho_gabarito.strip():
+            caminho_gabarito_final = caminho_gabarito.strip()
+            if not os.path.exists(caminho_gabarito_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de gabarito não encontrado: {caminho_gabarito_final}")
+        elif gabarito:
+            caminho_gabarito_final = await _salvar_upload_temporario(gabarito, "gabarito")
+            gabarito_temp_criada = True
+
+        if caminho_gabarito_final:
+            _validar_arquivo_pdf(caminho_gabarito_final, "Gabarito")
+            _validar_compatibilidade(caminho_prova_final, caminho_gabarito_final)
+
+        # 3. Executar a gravação
         extrair_e_salvar_prova_objetiva(caminho_prova_final, pasta_destino, caminho_gabarito_final)
         return {
             "status": "sucesso",
             "mensagem": f"Prova objetiva extraída e gravada com sucesso na pasta '{pasta_destino}'."
         }
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na extração/gravação: {str(e)}")
     finally:
@@ -250,31 +280,33 @@ async def api_extrair_e_salvar_prova_dissertativa(
 ):
     caminho_prova_final = None
     prova_temp_criada = False
-    
-    # 1. Resolver o caminho da prova
-    if caminho_prova and caminho_prova.strip():
-        caminho_prova_final = caminho_prova.strip()
-        if not os.path.exists(caminho_prova_final):
-            raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
-    elif prova:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_prova:
-            content = await prova.read()
-            tmp_prova.write(content)
-            caminho_prova_final = tmp_prova.name
-            prova_temp_criada = True
-    else:
-        raise HTTPException(
-            status_code=400, 
-            detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
-        )
-        
-    # 2. Executar a gravação
+
     try:
+        # 1. Resolver e validar o caminho da prova
+        if caminho_prova and caminho_prova.strip():
+            caminho_prova_final = caminho_prova.strip()
+            if not os.path.exists(caminho_prova_final):
+                raise HTTPException(status_code=400, detail=f"Arquivo de prova não encontrado: {caminho_prova_final}")
+        elif prova:
+            caminho_prova_final = await _salvar_upload_temporario(prova, "prova_dissertativa")
+            prova_temp_criada = True
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Forneça a prova por upload (campo 'prova') OU por caminho local (campo 'caminho_prova')."
+            )
+        _validar_arquivo_pdf(caminho_prova_final, "Prova")
+
+        # 2. Executar a gravação
         extrair_e_salvar_prova_dissertativa(caminho_prova_final, pasta_destino)
         return {
             "status": "sucesso",
             "mensagem": f"Prova dissertativa extraída e gravada com sucesso na pasta '{pasta_destino}'."
         }
+    except HTTPException:
+        raise
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro na extração/gravação: {str(e)}")
     finally:

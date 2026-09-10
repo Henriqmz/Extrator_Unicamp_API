@@ -230,8 +230,67 @@ def detectar_padrao_alternativas(elementos, mid_x, labels=None, page=None):
     return indices_individuais
 
 
+def validar_e_abrir_pdf(pdf_path, tipo_doc="Prova"):
+    """
+    Valida a integridade do arquivo PDF antes de prosseguir com qualquer processamento.
+    Lança ValueError ou FileNotFoundError se o arquivo:
+    - Não existir
+    - Estiver vazio (0 bytes)
+    - Não possuir o cabeçalho PDF válido (%PDF-)
+    - Estiver corrompido e não puder ser aberto pelo PyMuPDF
+    - Estiver criptografado / protegido por senha
+    - Não possuir páginas válidas
+    """
+    if not pdf_path or not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"{tipo_doc} não encontrado: '{pdf_path}'")
+
+    tamanho = os.path.getsize(pdf_path)
+    if tamanho == 0:
+        raise ValueError(f"O arquivo de {tipo_doc.lower()} está vazio ou corrompido (0 bytes): '{os.path.basename(pdf_path)}'.")
+
+    # Validação do cabeçalho PDF
+    try:
+        with open(pdf_path, "rb") as f:
+            header = f.read(1024)
+            if b"%PDF-" not in header:
+                raise ValueError(f"O arquivo '{os.path.basename(pdf_path)}' não é um documento PDF válido (cabeçalho '%PDF-' ausente).")
+    except ValueError:
+        raise
+    except Exception as e:
+        raise ValueError(f"Erro ao ler os bytes do arquivo de {tipo_doc.lower()}: {str(e)}")
+
+    doc = None
+    try:
+        doc = fitz.open(pdf_path)
+    except Exception as e:
+        raise ValueError(f"O arquivo de {tipo_doc.lower()} está corrompido ou ilegível: {str(e)}")
+
+    try:
+        if doc.is_encrypted:
+            doc.close()
+            raise ValueError(f"O arquivo de {tipo_doc.lower()} está protegido por senha/criptografado e não pode ser processado.")
+
+        if doc.page_count == 0:
+            doc.close()
+            raise ValueError(f"O arquivo de {tipo_doc.lower()} não possui páginas válidas para extração.")
+
+        try:
+            _ = doc[0].rect
+        except Exception as e:
+            doc.close()
+            raise ValueError(f"O arquivo de {tipo_doc.lower()} possui estrutura corrompida: {str(e)}")
+    except Exception:
+        if doc:
+            try:
+                doc.close()
+            except Exception:
+                pass
+        raise
+
+    return doc
+
 def extrair_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
+    doc = validar_e_abrir_pdf(pdf_path, tipo_doc="Prova")
     paginas = []
     for page_num, page in enumerate(doc):
         paginas.append({

@@ -6,6 +6,8 @@ from models import Questao
 from extractor import extrair_pdf, extrair_imagens, extrair_texto
 from processor import (
     detectar_edital_ano,
+    detectar_metadados_gabarito,
+    validar_compatibilidade_prova_gabarito,
     extrair_questoes,
     extrair_questoes_dissertativas,
     extrair_textos_comp,
@@ -49,6 +51,8 @@ def extrair_prova_objetiva(caminho_prova: str, caminho_gabarito: str = None) -> 
     mapear_imagens_a_questoes_e_alternativas(questoes, imagens, doc)
     
     if caminho_gabarito and os.path.exists(caminho_gabarito):
+        _, ano_gab, _ = detectar_metadados_gabarito(caminho_gabarito)
+        validar_compatibilidade_prova_gabarito(ano, ano_gab, edital_prova=edital)
         res = extrair_gabarito(caminho_gabarito)
         if isinstance(res, list):
             gabarito_respostas = None
@@ -110,6 +114,8 @@ def extrair_e_salvar_prova_objetiva(caminho_prova: str, pasta_destino: str, cami
     mapear_imagens_a_questoes_e_alternativas(questoes, imagens, doc)
     
     if caminho_gabarito and os.path.exists(caminho_gabarito):
+        _, ano_gab, _ = detectar_metadados_gabarito(caminho_gabarito)
+        validar_compatibilidade_prova_gabarito(ano, ano_gab, edital_prova=edital)
         res = extrair_gabarito(caminho_gabarito)
         if isinstance(res, list):
             gabarito_respostas = None

@@ -11,9 +11,13 @@ from models import Questao
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-PDF_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "Projeto", "Provas", "provas-e-gabaritos-unicamp-2026", "1-fase-unicamp-2026", "prova-q-x-1-fase-unicamp-2026.pdf"))
-GABARITO_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "Projeto", "Provas", "provas-e-gabaritos-unicamp-2026", "1-fase-unicamp-2026", "gabarito-q-x-1-fase-unicamp-2026.pdf"))
-PDF_2FASE_2026_PATH = os.path.abspath(os.path.join(BASE_DIR, "..", "Projeto", "Provas", "provas-e-gabaritos-unicamp-2026", "2-fase-unicamp-2026", "unicamp-2026-2-fase-prova-dia-1.pdf"))
+_provas_base = os.path.abspath(os.path.join(BASE_DIR, "..", "Extrator_Unicamp", "Provas"))
+if not os.path.exists(_provas_base):
+    _provas_base = os.path.abspath(os.path.join(BASE_DIR, "..", "Projeto", "Provas"))
+
+PDF_PATH = os.path.join(_provas_base, "provas-e-gabaritos-unicamp-2026", "1-fase-unicamp-2026", "prova-q-x-1-fase-unicamp-2026.pdf")
+GABARITO_PATH = os.path.join(_provas_base, "provas-e-gabaritos-unicamp-2026", "1-fase-unicamp-2026", "gabarito-q-x-1-fase-unicamp-2026.pdf")
+PDF_2FASE_2026_PATH = os.path.join(_provas_base, "provas-e-gabaritos-unicamp-2026", "2-fase-unicamp-2026", "unicamp-2026-2-fase-prova-dia-1.pdf")
 
 @pytest.fixture(scope="session", autouse=True)
 def cleanup():
@@ -35,6 +39,8 @@ def test_api_01_extrair_prova_objetiva_memoria():
     assert q46.alternativas.c.correta is True
     assert q46.alternativas.a.correta is False
     img_dir = os.path.join(BASE_DIR, "imgs")
+    if not os.path.exists(img_dir) and os.path.exists("imgs"):
+        img_dir = os.path.abspath("imgs")
     assert os.path.exists(img_dir)
     assert len(os.listdir(img_dir)) > 0
 

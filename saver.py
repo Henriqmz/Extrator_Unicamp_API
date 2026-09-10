@@ -12,10 +12,11 @@ def salvar_questoes(questoes, pasta):
         with open(nome, "w", encoding="utf-8") as f:
             json.dump(q.model_dump(), f, ensure_ascii=False, indent=2)
 
-def salvar_textos(textos, pasta, edital="unicamp", ano=2026, tipo_ou_cor="Q-X"):
+def salvar_textos(textos, pasta, edital="unicamp", ano=None, tipo_ou_cor="Q-X"):
     os.makedirs(pasta, exist_ok=True)
-    tipo_ou_cor_limpo = tipo_ou_cor.replace("/", "-")
+    tipo_ou_cor_limpo = (tipo_ou_cor or "Q-X").replace("/", "-")
+    ano_str = f"_{ano}" if ano else ""
     for idx, t in enumerate(textos, 1):
-        nome = os.path.join(pasta, f"{edital}_{ano}_{tipo_ou_cor_limpo}_COMP_{idx}.json")
+        nome = os.path.join(pasta, f"{edital}{ano_str}_{tipo_ou_cor_limpo}_COMP_{idx}.json")
         with open(nome, "w", encoding="utf-8") as f:
             json.dump(t.model_dump(), f, ensure_ascii=False, indent=2)
